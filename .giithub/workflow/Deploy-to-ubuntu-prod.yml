@@ -1,0 +1,50 @@
+name: Deploy to Ubuntu Prod
+
+on:
+  push:
+    branches:
+      - prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Install AWS CLI
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y awscli
+
+    - name: Set up AWS credentials
+      run: |
+        aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws configure set default.region ${{ secrets.AWS_REGION }}
+
+    - name: Deploy to S3
+      run: |
+        aws s3 sync ./public s3://${{ secrets.AWS_BUCKET_NAME }} --delete
+
+    - name: Invalidate CloudFront cache
+      run: |
+        aws cloudfront create-invalidation --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} --paths "/*"
+
+    - name: Install SSH client
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y openssh-client
+
+    - name: Set up SSH key
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+
+    - name: Deploy to Ubuntu Prod
+      run: |
+        ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${secrets.SSH_USERNAME}@${{ secrets.SERVER_IP }} 'mkdir -p /var/www/html/${{ secrets.SERVER_TARGET_FOLDER }}'
+        scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa -r ./public ${secrets.SSH_USERNAME}@${{ secrets.SERVER_IP }}:/var/www/html/${{ secrets.SERVER_TARGET_FOLDER }}
